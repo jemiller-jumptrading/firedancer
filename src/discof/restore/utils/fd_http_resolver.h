@@ -13,9 +13,10 @@ typedef struct fd_http_resolver_private fd_http_resolver_t;
 #define FD_HTTP_RESOLVER_MAGIC (0xF17EDA2CE551170) /* FIREDANCE HTTP RESOLVER V0 */
 
 typedef void
-(* fd_http_resolver_on_resolve_fn_t)( void *              _ctx,
-                                      fd_ip4_port_t       addr,
-                                      fd_ssinfo_t const * ssinfo );
+(* fd_http_resolver_on_resolve_fn_t)( void *                   _ctx,
+                                      fd_ip4_port_t            addr,
+                                      fd_sspeer_meta_t const * meta,
+                                      fd_ssinfo_t const *      ssinfo );
 
 FD_PROTOTYPES_BEGIN
 
@@ -35,8 +36,9 @@ fd_http_resolver_new( void *                           shmem,
 /* Add a peer to the resolver.  Peers are not de-duplicated and must
    be unique. */
 void
-fd_http_resolver_add( fd_http_resolver_t * resolver,
-                      fd_ip4_port_t        addr );
+fd_http_resolver_add( fd_http_resolver_t *     resolver,
+                      fd_ip4_port_t            addr,
+                      fd_sspeer_meta_t const * meta );
 
 fd_http_resolver_t *
 fd_http_resolver_join( void * shresolve );

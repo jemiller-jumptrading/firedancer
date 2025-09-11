@@ -22,8 +22,9 @@
 #define PEER_DEADLINE_NANOS_INVALID (5L*1000L*1000L*1000L) /* 5 seconds */
 
 struct fd_ssresolve_peer {
-  fd_ip4_port_t addr;
-  fd_ssinfo_t   ssinfo;
+  fd_ip4_port_t            addr;
+  fd_sspeer_meta_t const * meta;
+  fd_ssinfo_t              ssinfo;
 
   fd_ssresolve_t * full_ssresolve;
   fd_ssresolve_t * inc_ssresolve;
@@ -183,12 +184,14 @@ fd_http_resolver_join( void * shresolver ) {
 }
 
 void
-fd_http_resolver_add( fd_http_resolver_t * resolver,
-                      fd_ip4_port_t        addr ) {
+fd_http_resolver_add( fd_http_resolver_t *     resolver,
+                      fd_ip4_port_t            addr,
+                      fd_sspeer_meta_t const * meta ) {
   fd_ssresolve_peer_t * peer = peer_pool_ele_acquire( resolver->pool );
   FD_TEST( peer );
   peer->state                        = PEER_STATE_UNRESOLVED;
   peer->addr                         = addr;
+  peer->meta                         = meta;
   peer->fd.idx                       = ULONG_MAX;
   peer->ssinfo.full.slot             = ULONG_MAX;
   peer->ssinfo.incremental.base_slot = ULONG_MAX;
@@ -371,7 +374,7 @@ poll_advance( fd_http_resolver_t * resolver,
       deadline_list_ele_push_tail( resolver->valid, peer, resolver->pool );
       remove_peer( resolver, peer->fd.idx );
 
-      resolver->on_resolve_cb( resolver->cb_arg, peer->addr, &peer->ssinfo );
+      resolver->on_resolve_cb( resolver->cb_arg, peer->addr, peer->meta, &peer->ssinfo );
     }
   }
 }

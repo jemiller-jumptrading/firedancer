@@ -11,6 +11,9 @@
 
 #define FD_SSPEER_SELECTOR_MAGIC (0xF17EDA2CE5593350) /* FIREDANCE SSPING V0 */
 
+struct fd_sspeer_meta;
+typedef struct fd_sspeer_meta fd_sspeer_meta_t;
+
 /* fd_ssinfo stores the resolved snapshot slot information from a peer. */
 struct fd_ssinfo {
   struct {
@@ -37,9 +40,10 @@ typedef struct fd_sscluster_slot fd_sscluster_slot_t;
     selector, including the peer's address, resolved snapshot slots,
     and selector score. */
 struct fd_sspeer {
-  fd_ip4_port_t addr;   /* address of the peer */
-  fd_ssinfo_t   ssinfo; /* resolved snapshot slot info of the peer */
-  ulong         score;  /* selector score of peer */
+  fd_ip4_port_t            addr;   /* address of the peer */
+  fd_sspeer_meta_t const * meta;   /* associated metadata for peer */
+  fd_ssinfo_t              ssinfo; /* resolved snapshot slot info of the peer */
+  ulong                    score;  /* selector score of peer */
 };
 
 typedef struct fd_sspeer fd_sspeer_t;
@@ -74,10 +78,11 @@ fd_sspeer_selector_delete( void * shselector );
    fd_sspeer_selector_add updates the existing peer's score using the
    given peer latency and snapshot info.  Returns the updated score. */
 ulong
-fd_sspeer_selector_add( fd_sspeer_selector_t * selector,
-                        fd_ip4_port_t          addr,
-                        ulong                  peer_latency,
-                        fd_ssinfo_t const *    ssinfo );
+fd_sspeer_selector_add( fd_sspeer_selector_t *   selector,
+                        fd_ip4_port_t            addr,
+                        fd_sspeer_meta_t const * meta,
+                        ulong                    peer_latency,
+                        fd_ssinfo_t const *      ssinfo );
 
 /* Remove a peer from the selector.  Peers are removed when they are
    not reachable or serving corrupted/malformed snapshots.  This is a
