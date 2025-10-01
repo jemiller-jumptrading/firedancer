@@ -841,6 +841,11 @@ fd_gui_handle_snapshot_update( fd_gui_t *                 gui,
                                fd_snaprd_update_t const * msg );
 
 void
+fd_gui_handle_leader_schedule( fd_gui_t *                    gui,
+                               fd_stake_weight_msg_t const * leader_schedule,
+                               long                          now );
+
+void
 fd_gui_handle_tower_update( fd_gui_t *                   gui,
                             fd_tower_slot_done_t const * msg,
                             long                         now );

@@ -17,6 +17,8 @@
 #include "../../util/net/fd_net_headers.h"
 #include "../../disco/metrics/fd_metrics.h"
 #include "../../flamenco/gossip/fd_gossip_types.h"
+#include "../../discof/replay/fd_replay_tile.h"
+
 #include "../../waltz/http/fd_http_server.h"
 #include "../topo/fd_topo.h"
 
@@ -57,11 +59,21 @@ struct fd_gui_peers_node {
   fd_gui_peers_metric_rate_t gossvf_rx_sum; /* sum of gossvf_rx */
   fd_gui_peers_metric_rate_t gossip_tx_sum; /* sum of gossip_tx */
 
-  int         has_node_info;
+  int  has_val_info;
   char name    [ FD_GUI_PEERS_VALIDATOR_INFO_NAME_SZ     ];
   char website [ FD_GUI_PEERS_VALIDATOR_INFO_WEBSITE_SZ  ];
   char details [ FD_GUI_PEERS_VALIDATOR_INFO_DETAILS_SZ  ];
   char icon_uri[ FD_GUI_PEERS_VALIDATOR_INFO_ICON_URI_SZ ];
+
+  int         has_vote_info;
+  fd_pubkey_t vote_account;
+  fd_pubkey_t node_account;
+  ulong       stake;
+  ulong       last_vote_slot;
+  long        last_vote_timestamp;
+  uchar       commission;
+  ulong       epoch;
+  ulong       epoch_credits;
 
   struct {
     ulong next;
@@ -286,10 +298,15 @@ fd_gui_peers_handle_gossip_message( fd_gui_peers_ctx_t *  peers,
 /* fd_gui_peers_handle_gossip_message_tx parses frags on the gossip_out
    link and uses the contact info update to build up the peer table.
    */
-int
+void
 fd_gui_peers_handle_gossip_update( fd_gui_peers_ctx_t *               peers,
                                    fd_gossip_update_message_t const * update,
                                    long                               now );
+
+void
+fd_gui_peers_handle_vote_update( fd_gui_peers_ctx_t *      peers,
+                                 fd_replay_votes_t const * votes,
+                                 long                      now );
 
 /* fd_gui_peers_ws_message handles incoming websocket request payloads
    requesting peer-related responses.  ws_conn_id is the connection id

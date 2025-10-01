@@ -3,7 +3,6 @@
 
 #include "../../ballet/json/cJSON.h"
 #include "../../flamenco/gossip/fd_gossip_private.h"
-#include "../../flamenco/gossip/fd_gossip_types.h"
 
 #define LOGGING 0
 
@@ -187,7 +186,7 @@ fd_gui_peers_gossip_stats_snap( fd_gui_peers_ctx_t *          peers,
     fd_gui_peers_node_t * cur = fd_gui_peers_bandwidth_tracking_fwd_iter_ele( iter, peers->contact_info_table );
 
     if( FD_UNLIKELY( j<gossip_stats->network_ingress_peer_sz ) ) {
-      if( FD_LIKELY( cur->has_node_info ) ) FD_TEST( fd_cstr_printf_check( gossip_stats->network_ingress_peer_names[ j ], sizeof(gossip_stats->network_ingress_peer_names[ j ]), NULL, "%s", cur->name ) );
+      if( FD_LIKELY( cur->has_val_info ) ) FD_TEST( fd_cstr_printf_check( gossip_stats->network_ingress_peer_names[ j ], sizeof(gossip_stats->network_ingress_peer_names[ j ]), NULL, "%s", cur->name ) );
       else                                  gossip_stats->network_ingress_peer_names[ j ][ 0 ] = '\0';
       gossip_stats->network_ingress_peer_bytes_per_sec[ j ] = cur->gossvf_rx_sum.rate;
       fd_memcpy( &gossip_stats->network_ingress_peer_identities[ j ], cur->contact_info.pubkey.uc, 32UL );
@@ -231,7 +230,7 @@ fd_gui_peers_gossip_stats_snap( fd_gui_peers_ctx_t *          peers,
     fd_gui_peers_node_t * cur = fd_gui_peers_bandwidth_tracking_fwd_iter_ele( iter, peers->contact_info_table );
 
     if( FD_UNLIKELY( j<gossip_stats->network_egress_peer_sz ) ) {
-      if( FD_LIKELY( cur->has_node_info ) ) FD_TEST( fd_cstr_printf_check( gossip_stats->network_egress_peer_names[ j ], sizeof(gossip_stats->network_egress_peer_names[ j ]), NULL, "%s", cur->name ) );
+      if( FD_LIKELY( cur->has_val_info ) ) FD_TEST( fd_cstr_printf_check( gossip_stats->network_egress_peer_names[ j ], sizeof(gossip_stats->network_egress_peer_names[ j ]), NULL, "%s", cur->name ) );
       else                                  gossip_stats->network_egress_peer_names[ j ][ 0 ] = '\0';
       gossip_stats->network_egress_peer_bytes_per_sec[ j ] = cur->gossip_tx_sum.rate;
       fd_memcpy( &gossip_stats->network_egress_peer_identities[ j ], cur->contact_info.pubkey.uc, 32UL );
@@ -452,7 +451,7 @@ fd_gui_peers_handle_gossip_message( fd_gui_peers_ctx_t *  peers,
 #endif
 }
 
-int
+void
 fd_gui_peers_handle_gossip_update( fd_gui_peers_ctx_t *               peers,
                                    fd_gossip_update_message_t const * update,
                                    long                               now ) {
@@ -500,7 +499,7 @@ fd_gui_peers_handle_gossip_update( fd_gui_peers_ctx_t *               peers,
           /* update does nothing */
           if( FD_UNLIKELY( fd_gui_peers_contact_info_eq( &peer->contact_info, update->contact_info.contact_info ) ) ) {
             peer->contact_info.wallclock_nanos = update->contact_info.contact_info->wallclock_nanos;
-            return FD_GUI_PEERS_NODE_NOP;
+            break;
           }
 
           fd_gui_peers_node_sock_map_idx_remove_fast( peers->node_sock_map, update->contact_info.idx, peers->contact_info_table );
@@ -514,7 +513,9 @@ fd_gui_peers_handle_gossip_update( fd_gui_peers_ctx_t *               peers,
           fd_gui_peers_live_table_idx_insert        ( peers->live_table,    update->contact_info.idx, peers->contact_info_table );
           fd_gui_peers_node_sock_map_idx_insert     ( peers->node_sock_map, update->contact_info.idx, peers->contact_info_table );
 
-          return FD_GUI_PEERS_NODE_UPDATE;
+          /* broadcast update to WebSocket clients */
+          fd_gui_peers_printf_gossip_update( peers, FD_GUI_PEERS_NODE_UPDATE, update->contact_info.idx );
+          fd_http_server_ws_broadcast( peers->http );
         } else {
           FD_TEST( !fd_gui_peers_node_pubkey_map_ele_query_const( peers->node_pubkey_map, &update->contact_info.contact_info->pubkey, NULL, peers->contact_info_table ) );
 #if LOGGING
@@ -526,7 +527,8 @@ fd_gui_peers_handle_gossip_update( fd_gui_peers_ctx_t *               peers,
           memset( &peer->gossip_tx,     0, sizeof(peer->gossip_tx) );
           memset( &peer->gossvf_rx_sum, 0, sizeof(peer->gossvf_rx_sum) );
           memset( &peer->gossip_tx_sum, 0, sizeof(peer->gossip_tx_sum) );
-          peer->has_node_info = 0;
+          peer->has_val_info = 0;
+          peer->has_vote_info = 0;
           peer->valid = 1;
           peer->update_time_nanos = now;
           fd_memcpy( &peer->contact_info, update->contact_info.contact_info, sizeof(peer->contact_info) );
@@ -540,11 +542,12 @@ fd_gui_peers_handle_gossip_update( fd_gui_peers_ctx_t *               peers,
           fd_gui_peers_bandwidth_tracking_idx_insert( peers->bw_tracking, update->contact_info.idx, peers->contact_info_table );
 
           fd_gui_printf_peers_view_resize( peers, fd_gui_peers_live_table_ele_cnt( peers->live_table ) );
-          FD_TEST( !fd_http_server_ws_broadcast( peers->http ) );
+          fd_http_server_ws_broadcast( peers->http );
 
-          return FD_GUI_PEERS_NODE_ADD;
+          /* broadcast update to WebSocket clients */
+          fd_gui_peers_printf_gossip_update( peers, FD_GUI_PEERS_NODE_ADD, update->contact_info.idx );
+          fd_http_server_ws_broadcast( peers->http );
         }
-
         break;
       }
       case FD_GOSSIP_UPDATE_TAG_CONTACT_INFO_REMOVE: {
@@ -577,13 +580,54 @@ fd_gui_peers_handle_gossip_update( fd_gui_peers_ctx_t *               peers,
         peer->valid = 0;
 
         fd_gui_printf_peers_view_resize( peers, fd_gui_peers_live_table_ele_cnt( peers->live_table ) );
-        FD_TEST( !fd_http_server_ws_broadcast( peers->http ) );
+        fd_http_server_ws_broadcast( peers->http );
+
+        /* broadcast update to WebSocket clients */
+        fd_gui_peers_printf_gossip_update( peers, FD_GUI_PEERS_NODE_DELETE, update->contact_info.idx );
+        fd_http_server_ws_broadcast( peers->http );
         break;
       }
       default: break;
     }
+}
 
-    return FD_GUI_PEERS_NODE_NOP;
+void
+fd_gui_peers_handle_vote_update( fd_gui_peers_ctx_t *      peers,
+                                 fd_replay_votes_t const * votes,
+                                 long                      now ) {
+  (void)now;
+
+
+  for( ulong i=0UL; i<votes->vote_cnt; i++ ) {
+    ulong peer_idx = fd_gui_peers_node_pubkey_map_idx_query( peers->node_pubkey_map, &votes->snapshot[ i ].node_account, ULONG_MAX, peers->contact_info_table );
+    if( FD_UNLIKELY( peer_idx==ULONG_MAX ) ) return; /* peer not on gossip */
+
+    fd_gui_peers_node_t * peer = peers->contact_info_table + peer_idx;
+
+    int vote_eq = peer->has_vote_info
+               && !memcmp( peer->node_account.uc, votes->snapshot[ i ].node_account.uc, 32UL)
+               && !memcmp( peer->vote_account.uc, votes->snapshot[ i ].vote_account.uc, 32UL)
+               && peer->stake                   ==votes->snapshot[ i ].stake
+               && peer->last_vote_slot          ==votes->snapshot[ i ].last_vote_slot
+               && peer->last_vote_timestamp     ==votes->snapshot[ i ].last_vote_timestamp
+               && peer->commission              ==votes->snapshot[ i ].commission
+               && peer->epoch                   ==votes->snapshot[ i ].epoch
+               && peer->epoch_credits           ==votes->snapshot[ i ].epoch_credits;
+
+    if( FD_UNLIKELY( vote_eq ) ) return; /* nop */
+
+    peer->has_vote_info = 1;
+    peer->vote_account        = votes->snapshot[ i ].vote_account;
+    peer->stake               = votes->snapshot[ i ].stake;
+    peer->last_vote_slot      = votes->snapshot[ i ].last_vote_slot;
+    peer->last_vote_timestamp = votes->snapshot[ i ].last_vote_timestamp;
+    peer->epoch_credits       = votes->snapshot[ i ].epoch_credits;
+    peer->commission          = votes->snapshot[ i ].commission;
+
+    /* broadcast update to WebSocket clients */
+    fd_gui_peers_printf_gossip_update( peers, FD_GUI_PEERS_NODE_UPDATE, peer_idx );
+    fd_http_server_ws_broadcast( peers->http );
+  }
 }
 
 static void
