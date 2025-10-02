@@ -123,6 +123,7 @@ struct fd_rdisp_txn {
 #define IN_DEGREE_UNSTAGED            (UINT_MAX-1U)/* unstaged, not disptached */
 #define IN_DEGREE_DISPATCHED          (UINT_MAX-2U)/* staged,   dispatched */
 #define IN_DEGREE_UNSTAGED_DISPATCHED (UINT_MAX-3U)/* unstaged, dispatched */
+#define IN_DEGREE_ZOMBIE              (UINT_MAX-4U)/* zombie */
   /* a transaction that is staged and dispatched is must have an
      in_degree of 0.  in_degree isn't a meaningful concept for unstaged
      transactions. */
@@ -156,6 +157,9 @@ struct fd_rdisp_txn {
        time, so there's no conflict with storage there either. */
     uint unstaged_next;
     uint free_next;
+    /* If ZOMBIE, pointer back to block is here.  No storage conflict
+       because ZOMBIE is an exclusive state. */
+    uint block_idx;
   };
 
 
@@ -222,6 +226,13 @@ typedef struct fd_rdisp_txn fd_rdisp_txn_t;
 #define SLIST_IDX_T uint
 #define SLIST_NEXT  unstaged_next
 #include "../../util/tmpl/fd_slist.c"
+
+#define DLIST_IDX_T uint
+#define DLIST_PREV  edges[0]
+#define DLIST_NEXT  edges[1]
+#define DLIST_NAME  zombie_dlist
+#define DLIST_ELE_T fd_rdisp_txn_t
+#include "../../util/tmpl/fd_dlist.c"
 
 
 /* ACCT_INFO_FLAG: It's a bit unfortunate that we have to maintain these
@@ -383,6 +394,7 @@ struct fd_rdisp_blockinfo {
   uint map_chain_next;
   uint ll_next;
   unstaged_txn_ll_t ll[ 1 ]; /* used only when unstaged */
+  zombie_dlist_t    zombie_list[ 1 ];
 };
 typedef struct fd_rdisp_blockinfo fd_rdisp_blockinfo_t;
 
@@ -539,6 +551,10 @@ fd_rdisp_new( void * mem,
   block_map_new ( _bmap,  chain_cnt, seed );
   block_pool_new( _bpool, block_depth+1UL );
 
+  fd_rdisp_blockinfo_t * bpool_temp_join = block_pool_join( _bpool );
+  for( ulong i=0UL; i<block_depth+1UL; i++ ) zombie_dlist_new( bpool_temp_join[ i ].zombie_list );
+  block_pool_leave( bpool_temp_join );
+
   disp->free_lanes = 0xF;
   for( ulong i=0UL; i<4UL; i++ ) {
     pending_prq_new( _pending, depth );
@@ -589,6 +605,8 @@ fd_rdisp_join( void * mem ) {
   disp->unstaged   = (fd_rdisp_unstaged_t *)_unstaged;
   disp->blockmap   = block_map_join( _bmap );
   disp->block_pool = block_pool_join( _bpool );
+
+  for( ulong i=0UL; i<block_depth+1UL; i++ ) zombie_dlist_join( disp->block_pool[ i ].zombie_list );
 
   for( ulong i=0UL; i<4UL; i++ ) {
     disp->lanes[i].pending = pending_prq_join( _pending );
@@ -687,7 +705,7 @@ fd_rdisp_add_block( fd_rdisp_t          * disp,
 
 int
 fd_rdisp_remove_block( fd_rdisp_t          * disp,
-                       FD_RDISP_BLOCK_TAG_T   block_tag ) {
+                       FD_RDISP_BLOCK_TAG_T  block_tag ) {
   fd_rdisp_blockinfo_t * block_pool = disp->block_pool;
 
   fd_rdisp_blockinfo_t * block   = block_map_ele_query( disp->blockmap, &block_tag, NULL, block_pool );
@@ -695,6 +713,7 @@ fd_rdisp_remove_block( fd_rdisp_t          * disp,
 
   FD_TEST( block->schedule_ready );
   FD_TEST( block->completed_cnt==block->inserted_cnt );
+  FD_TEST( zombie_dlist_is_empty( block->zombie_list, disp->pool ) );
 
   if( FD_LIKELY( block->staged ) ) {
     ulong staging_lane = (ulong)block->staging_lane;
@@ -715,7 +734,7 @@ fd_rdisp_remove_block( fd_rdisp_t          * disp,
 
 int
 fd_rdisp_abandon_block( fd_rdisp_t          * disp,
-                        FD_RDISP_BLOCK_TAG_T   block_tag ) {
+                        FD_RDISP_BLOCK_TAG_T  block_tag ) {
   fd_rdisp_blockinfo_t * block_pool = disp->block_pool;
 
   fd_rdisp_blockinfo_t * block   = block_map_ele_query( disp->blockmap, &block_tag, NULL, disp->block_pool );
@@ -728,7 +747,10 @@ fd_rdisp_abandon_block( fd_rdisp_t          * disp,
        READY */
     ulong txn = fd_rdisp_get_next_ready( disp, block_tag );
     FD_TEST( txn );
-    fd_rdisp_complete_txn( disp, txn );
+    fd_rdisp_complete_txn( disp, txn, 1 );
+  }
+  while( !zombie_dlist_is_empty( block->zombie_list, disp->pool ) ) {
+    fd_rdisp_complete_txn( disp, zombie_dlist_idx_pop_head( block->zombie_list, disp->pool ), 1 );
   }
 
   if( FD_LIKELY( block->staged ) ) {
@@ -1202,13 +1224,15 @@ fd_rdisp_get_next_ready( fd_rdisp_t           * disp,
 
 void
 fd_rdisp_complete_txn( fd_rdisp_t * disp,
-                       ulong        txn_idx ) {
+                       ulong        txn_idx,
+                       int          reclaim ) {
 
   fd_rdisp_txn_t * rtxn = disp->pool + txn_idx;
+  fd_rdisp_blockinfo_t * block = NULL;
 
   if( FD_UNLIKELY( rtxn->in_degree==IN_DEGREE_UNSTAGED_DISPATCHED ) ) {
     /* Unstaged */
-    fd_rdisp_blockinfo_t * block = block_map_ele_query( disp->blockmap, &disp->unstaged[ txn_idx ].block, NULL, disp->block_pool );
+    block = block_map_ele_query( disp->blockmap, &disp->unstaged[ txn_idx ].block, NULL, disp->block_pool );
     FD_TEST( rtxn==unstaged_txn_ll_ele_peek_head( block->ll, disp->pool ) );
     unstaged_txn_ll_ele_pop_head( block->ll, disp->pool );
     block->completed_cnt++;
@@ -1356,15 +1380,27 @@ fd_rdisp_complete_txn( fd_rdisp_t * disp,
       }
       edge_idx += fd_ulong_if( i<w_cnt, 1UL, 3UL );
     }
-    block_slist_ele_peek_head( disp->lanes[ lane ].block_ll, disp->block_pool )->completed_cnt++;
+    block = block_slist_ele_peek_head( disp->lanes[ lane ].block_ll, disp->block_pool );
+    block->completed_cnt++;
+  } else if( FD_LIKELY( rtxn->in_degree==IN_DEGREE_ZOMBIE ) ) {
+    FD_TEST( reclaim );
+    block = block_pool_ele( disp->block_pool, rtxn->block_idx );
+    zombie_dlist_ele_remove( block->zombie_list, rtxn, disp->pool );
+    /* Fall through to the pool release branch below. */
   } else {
     FD_LOG_CRIT(( "completed un-dispatched transaction %lu", txn_idx ));
   }
-  /* For testing purposes, to make sure we don't read a completed
-     transaction, we can clobber the memory. */
-  /* memset( disp->pool+txn_idx, '\xCC', sizeof(fd_rdisp_txn_t) ); */
-  rtxn->in_degree = IN_DEGREE_FREE;
-  pool_idx_release( disp->pool, txn_idx );
+  if( reclaim ) {
+    /* For testing purposes, to make sure we don't read a completed
+       transaction, we can clobber the memory. */
+    /* memset( disp->pool+txn_idx, '\xCC', sizeof(fd_rdisp_txn_t) ); */
+    rtxn->in_degree = IN_DEGREE_FREE;
+    pool_idx_release( disp->pool, txn_idx );
+  } else {
+    rtxn->in_degree = IN_DEGREE_ZOMBIE;
+    zombie_dlist_ele_push_tail( block->zombie_list, rtxn, disp->pool );
+    rtxn->block_idx = (uint)block_pool_idx( disp->block_pool, block );
+  }
 }
 
 
