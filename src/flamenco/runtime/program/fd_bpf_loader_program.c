@@ -542,7 +542,7 @@ fd_bpf_execute( fd_exec_instr_ctx_t *            instr_ctx,
        as to what caused the error.
        https://github.com/anza-xyz/agave/blob/v3.0.4/programs/bpf_loader/src/lib.rs#L1556-L1618 */
     if( FD_UNLIKELY( stricter_abi_and_runtime_constraints &&
-                     instr_ctx->txn_ctx->exec_err==FD_VM_ERR_EBPF_ACCESS_VIOLATION &&
+                     ( exec_err==FD_VM_ERR_EBPF_ACCESS_VIOLATION || instr_ctx->txn_ctx->exec_err==FD_VM_ERR_EBPF_ACCESS_VIOLATION ) &&
                      vm->segv_vaddr!=ULONG_MAX ) ) {
 
       /* vaddrs start at 0xFFFFFFFF + 1, so anything below it would not correspond to any account metadata. */
