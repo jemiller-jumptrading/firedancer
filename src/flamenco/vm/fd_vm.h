@@ -217,6 +217,7 @@ struct __attribute__((aligned(FD_VM_HOST_REGION_ALIGN))) fd_vm {
      - (If direct mapping is enabled) determining the instruction error
        code to return on store operations. */
   ulong segv_vaddr;
+  ulong segv_access_len;
   uchar segv_access_type;
 
   ulong sbpf_version;     /* SBPF version, SIMD-0161 */
@@ -236,7 +237,7 @@ FD_PROTOTYPES_BEGIN
    integer power of 2.  FOOTPRINT is a multiple of align.
    These are provided to facilitate compile time declarations. */
 #define FD_VM_ALIGN     FD_VM_HOST_REGION_ALIGN
-#define FD_VM_FOOTPRINT (527824UL)
+#define FD_VM_FOOTPRINT (527840UL)
 
 
 /* fd_vm_{align,footprint} give the needed alignment and footprint

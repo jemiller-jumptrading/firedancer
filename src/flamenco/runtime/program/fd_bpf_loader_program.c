@@ -541,9 +541,10 @@ fd_bpf_execute( fd_exec_instr_ctx_t *            instr_ctx,
        and the access type was a store, a different error code is returned to give developers more insight
        as to what caused the error.
        https://github.com/anza-xyz/agave/blob/v3.0.4/programs/bpf_loader/src/lib.rs#L1556-L1618 */
-    if( FD_UNLIKELY( stricter_abi_and_runtime_constraints && exec_err==FD_VM_ERR_EBPF_ACCESS_VIOLATION &&
-                     vm->segv_vaddr!=ULONG_MAX &&
-                     vm->segv_access_type==FD_VM_ACCESS_TYPE_ST ) ) {
+    if( FD_UNLIKELY( stricter_abi_and_runtime_constraints &&
+                     instr_ctx->txn_ctx->exec_err==FD_VM_ERR_EBPF_ACCESS_VIOLATION &&
+                     vm->segv_vaddr!=ULONG_MAX ) ) {
+
       /* vaddrs start at 0xFFFFFFFF + 1, so anything below it would not correspond to any account metadata. */
       if( FD_UNLIKELY( vm->segv_vaddr>>32UL==0UL ) ) {
         return FD_EXECUTOR_INSTR_ERR_PROGRAM_FAILED_TO_COMPLETE;
@@ -551,7 +552,6 @@ fd_bpf_execute( fd_exec_instr_ctx_t *            instr_ctx,
 
       /* Find the account meta corresponding to the vaddr */
       ulong vaddr_offset = vm->segv_vaddr & FD_VM_OFFSET_MASK;
-      ulong acc_region_addl_off = is_deprecated ? 0UL : MAX_PERMITTED_DATA_INCREASE;
 
       /* If the vaddr doesn't live in the input region, then we don't need to
          bother trying to iterate through all of the borrowed accounts. */
@@ -564,23 +564,35 @@ fd_bpf_execute( fd_exec_instr_ctx_t *            instr_ctx,
          vm error based on the account's accesss permissions. */
       for( ushort i=0UL; i<instr_ctx->instr->acct_cnt; i++ ) {
         /* https://github.com/anza-xyz/agave/blob/v2.1.4/programs/bpf_loader/src/lib.rs#L1455 */
-        fd_guarded_borrowed_account_t instr_acc = {0};
-        FD_TRY_BORROW_INSTR_ACCOUNT_DEFAULT_ERR_CHECK( instr_ctx, i, &instr_acc );
 
+        /* Find the input memory region that corresponds to the access
+           https://github.com/anza-xyz/agave/blob/v3.0.4/programs/bpf_loader/src/lib.rs#L1566-L1617 */
         ulong idx = acc_region_metas[i].region_idx;
-        if( input_mem_regions[idx].vaddr_offset<=vaddr_offset && vaddr_offset<input_mem_regions[idx].vaddr_offset+pre_lens[i]+acc_region_addl_off ) {
+        /* FIXME: is this region index correct? and other places in the code? what about the metadata regions? */
+        fd_vm_input_region_t const * input_mem_region = &input_mem_regions[idx];
+        if( ( vaddr_offset >= input_mem_region->vaddr_offset ) &&
+            ( vaddr_offset <= input_mem_regions[idx].vaddr_offset+input_mem_regions[idx].address_space_reserved ) ) {
 
-          /* Found an input mem region!
-             https://github.com/anza-xyz/agave/blob/89872fdb074e6658646b2b57a299984f0059cc84/programs/bpf_loader/src/lib.rs#L1515-L1528 */
-          if( !FD_FEATURE_ACTIVE_BANK( instr_ctx->txn_ctx->bank, remove_accounts_executable_flag_checks ) &&
-              fd_borrowed_account_is_executable( &instr_acc ) ) {
-            err = FD_EXECUTOR_INSTR_ERR_EXECUTABLE_DATA_MODIFIED;
-          } else if( fd_borrowed_account_is_writable( &instr_acc ) ) {
-            err = FD_EXECUTOR_INSTR_ERR_EXTERNAL_DATA_MODIFIED;
-          } else {
-            err = FD_EXECUTOR_INSTR_ERR_READONLY_DATA_MODIFIED;
+          /* https://github.com/anza-xyz/agave/blob/v3.0.4/programs/bpf_loader/src/lib.rs#L1575-L1616 */
+          fd_guarded_borrowed_account_t instr_acc = {0};
+          FD_TRY_BORROW_INSTR_ACCOUNT_DEFAULT_ERR_CHECK( instr_ctx, i, &instr_acc );
+
+          /* https://github.com/anza-xyz/agave/blob/v3.0.4/programs/bpf_loader/src/lib.rs#L1592-L1601 */
+          if( vm->segv_access_type == FD_VM_ACCESS_TYPE_ST ) {
+            int borrow_err = FD_EXECUTOR_INSTR_SUCCESS;
+            if( !fd_borrowed_account_can_data_be_changed( &instr_acc, &borrow_err ) || borrow_err != FD_EXECUTOR_INSTR_SUCCESS ) {
+              return borrow_err;
+            } else {
+              return FD_EXECUTOR_INSTR_ERR_INVALID_REALLOC;
+            }
+          } else if ( vm->segv_access_type == FD_VM_ACCESS_TYPE_LD ) {
+            int borrow_err = FD_EXECUTOR_INSTR_SUCCESS;
+            if( !fd_borrowed_account_can_data_be_changed( &instr_acc, &borrow_err ) || borrow_err != FD_EXECUTOR_INSTR_SUCCESS ) {
+              return FD_EXECUTOR_INSTR_ERR_ACC_DATA_TOO_SMALL;
+            } else {
+              return FD_EXECUTOR_INSTR_ERR_INVALID_REALLOC;
+            }
           }
-          return err;
         }
       }
     }

@@ -476,6 +476,7 @@ interp_exec:
     if( FD_UNLIKELY( !haddr ) ) {
       vm->segv_vaddr       = vaddr;
       vm->segv_access_type = FD_VM_ACCESS_TYPE_ST;
+      vm->segv_access_len  = 1UL;
       goto sigsegv;
     } /* Note: untaken branches don't consume BTB */
     fd_vm_mem_st_1( haddr, (uchar)imm );
@@ -488,6 +489,7 @@ interp_exec:
     if( FD_UNLIKELY( !haddr ) ) {
       vm->segv_vaddr       = vaddr;
       vm->segv_access_type = FD_VM_ACCESS_TYPE_LD;
+      vm->segv_access_len  = 1UL;
       goto sigsegv;
     } /* Note: untaken branches don't consume BTB */
     reg[ dst ] = fd_vm_mem_ld_1( haddr );
@@ -504,6 +506,7 @@ interp_exec:
     if( FD_UNLIKELY( !haddr ) ) {
       vm->segv_vaddr       = vaddr;
       vm->segv_access_type = FD_VM_ACCESS_TYPE_ST;
+      vm->segv_access_len  = 1UL;
       goto sigsegv;
     } /* Note: untaken branches don't consume BTB */ /* FIXME: sigrdonly */
     fd_vm_mem_st_1( haddr, (uchar)reg_src );
@@ -545,7 +548,7 @@ interp_exec:
     if( FD_UNLIKELY( sigsegv ) ) {
       vm->segv_vaddr       = vaddr;
       vm->segv_access_type = FD_VM_ACCESS_TYPE_ST;
-
+      vm->segv_access_len  = 2UL;
       goto sigsegv;
     } /* Note: untaken branches don't consume BTB */ /* FIXME: sigbus */
     fd_vm_mem_st_2( haddr, (ushort)imm );
@@ -559,6 +562,7 @@ interp_exec:
     if( FD_UNLIKELY( sigsegv ) ) {
       vm->segv_vaddr       = vaddr;
       vm->segv_access_type = FD_VM_ACCESS_TYPE_LD;
+      vm->segv_access_len  = 2UL;
       goto sigsegv; /* Note: untaken branches don't consume BTB */ /* FIXME: sigbus */
     }
     reg[ dst ] = fd_vm_mem_ld_2( haddr );
@@ -576,7 +580,7 @@ interp_exec:
     if( FD_UNLIKELY( sigsegv ) ) {
       vm->segv_vaddr       = vaddr;
       vm->segv_access_type = FD_VM_ACCESS_TYPE_ST;
-
+      vm->segv_access_len  = 2UL;
       goto sigsegv;
     } /* Note: untaken branches don't consume BTB */ /* FIXME: sigbus */
     fd_vm_mem_st_2( haddr, (ushort)reg_src );
@@ -827,7 +831,7 @@ interp_exec:
     if( FD_UNLIKELY( sigsegv ) ) {
       vm->segv_vaddr       = vaddr;
       vm->segv_access_type = FD_VM_ACCESS_TYPE_ST;
-
+      vm->segv_access_len  = 4UL;
       goto sigsegv;
     } /* Note: untaken branches don't consume BTB */ /* FIXME: sigbus */
     fd_vm_mem_st_4( haddr, imm );
@@ -844,6 +848,7 @@ interp_exec:
     if( FD_UNLIKELY( sigsegv ) ) {
       vm->segv_vaddr       = vaddr;
       vm->segv_access_type = FD_VM_ACCESS_TYPE_LD;
+      vm->segv_access_len  = 4UL;
       goto sigsegv; /* Note: untaken branches don't consume BTB */ /* FIXME: sigbus */
     }
     reg[ dst ] = fd_vm_mem_ld_4( haddr );
@@ -890,7 +895,7 @@ interp_exec:
     if( FD_UNLIKELY( sigsegv ) ) {
       vm->segv_vaddr       = vaddr;
       vm->segv_access_type = FD_VM_ACCESS_TYPE_ST;
-
+      vm->segv_access_len  = 4UL;
       goto sigsegv;
     } /* Note: untaken branches don't consume BTB */ /* FIXME: sigbus */
     fd_vm_mem_st_4( haddr, (uint)reg_src );
@@ -923,7 +928,7 @@ interp_exec:
     if( FD_UNLIKELY( sigsegv ) ) {
       vm->segv_vaddr       = vaddr;
       vm->segv_access_type = FD_VM_ACCESS_TYPE_ST;
-
+      vm->segv_access_len  = 8UL;
       goto sigsegv;
     } /* Note: untaken branches don't consume BTB */ /* FIXME: sigbus */
     fd_vm_mem_st_8( haddr, (ulong)(long)(int)imm );
@@ -937,6 +942,7 @@ interp_exec:
     if( FD_UNLIKELY( sigsegv ) ) {
       vm->segv_vaddr       = vaddr;
       vm->segv_access_type = FD_VM_ACCESS_TYPE_LD;
+      vm->segv_access_len  = 8UL;
       goto sigsegv; /* Note: untaken branches don't consume BTB */ /* FIXME: sigbus */
     }
     reg[ dst ] = fd_vm_mem_ld_8( haddr );
@@ -970,7 +976,7 @@ interp_exec:
     if( FD_UNLIKELY( sigsegv ) ) {
       vm->segv_vaddr       = vaddr;
       vm->segv_access_type = FD_VM_ACCESS_TYPE_ST;
-
+      vm->segv_access_len  = 8UL;
       goto sigsegv;
     } /* Note: untaken branches don't consume BTB */ /* FIXME: sigbus */
     fd_vm_mem_st_8( haddr, reg_src );
