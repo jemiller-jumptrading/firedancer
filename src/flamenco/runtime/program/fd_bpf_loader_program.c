@@ -568,7 +568,6 @@ fd_bpf_execute( fd_exec_instr_ctx_t *            instr_ctx,
         /* Find the input memory region that corresponds to the access
            https://github.com/anza-xyz/agave/blob/v3.0.4/programs/bpf_loader/src/lib.rs#L1566-L1617 */
         ulong idx = acc_region_metas[i].region_idx;
-        /* FIXME: is this region index correct? and other places in the code? what about the metadata regions? */
         fd_vm_input_region_t const * input_mem_region = &input_mem_regions[idx];
         if( ( vaddr_offset >= input_mem_region->vaddr_offset ) &&
             ( vaddr_offset <= input_mem_regions[idx].vaddr_offset+input_mem_regions[idx].address_space_reserved ) ) {
@@ -577,20 +576,23 @@ fd_bpf_execute( fd_exec_instr_ctx_t *            instr_ctx,
           fd_guarded_borrowed_account_t instr_acc = {0};
           FD_TRY_BORROW_INSTR_ACCOUNT_DEFAULT_ERR_CHECK( instr_ctx, i, &instr_acc );
 
-          /* https://github.com/anza-xyz/agave/blob/v3.0.4/programs/bpf_loader/src/lib.rs#L1592-L1601 */
-          if( vm->segv_access_type == FD_VM_ACCESS_TYPE_ST ) {
-            int borrow_err = FD_EXECUTOR_INSTR_SUCCESS;
-            if( !fd_borrowed_account_can_data_be_changed( &instr_acc, &borrow_err ) || borrow_err != FD_EXECUTOR_INSTR_SUCCESS ) {
-              return borrow_err;
-            } else {
-              return FD_EXECUTOR_INSTR_ERR_INVALID_REALLOC;
-            }
-          } else if ( vm->segv_access_type == FD_VM_ACCESS_TYPE_LD ) {
-            int borrow_err = FD_EXECUTOR_INSTR_SUCCESS;
-            if( !fd_borrowed_account_can_data_be_changed( &instr_acc, &borrow_err ) || borrow_err != FD_EXECUTOR_INSTR_SUCCESS ) {
-              return FD_EXECUTOR_INSTR_ERR_ACC_DATA_TOO_SMALL;
-            } else {
-              return FD_EXECUTOR_INSTR_ERR_INVALID_REALLOC;
+          /* https://github.com/anza-xyz/agave/blob/v3.0.4/programs/bpf_loader/src/lib.rs#L1581-L1616 */
+          if( fd_ulong_sat_add( vaddr_offset, vm->segv_access_len ) <= input_mem_regions[idx].vaddr_offset+input_mem_regions[idx].address_space_reserved ) {
+            /* https://github.com/anza-xyz/agave/blob/v3.0.4/programs/bpf_loader/src/lib.rs#L1592-L1601 */
+            if( vm->segv_access_type == FD_VM_ACCESS_TYPE_ST ) {
+              int borrow_err = FD_EXECUTOR_INSTR_SUCCESS;
+              if( !fd_borrowed_account_can_data_be_changed( &instr_acc, &borrow_err ) || borrow_err != FD_EXECUTOR_INSTR_SUCCESS ) {
+                return borrow_err;
+              } else {
+                return FD_EXECUTOR_INSTR_ERR_INVALID_REALLOC;
+              }
+            } else if ( vm->segv_access_type == FD_VM_ACCESS_TYPE_LD ) {
+              int borrow_err = FD_EXECUTOR_INSTR_SUCCESS;
+              if( !fd_borrowed_account_can_data_be_changed( &instr_acc, &borrow_err ) || borrow_err != FD_EXECUTOR_INSTR_SUCCESS ) {
+                return FD_EXECUTOR_INSTR_ERR_ACC_DATA_TOO_SMALL;
+              } else {
+                return FD_EXECUTOR_INSTR_ERR_INVALID_REALLOC;
+              }
             }
           }
         }
