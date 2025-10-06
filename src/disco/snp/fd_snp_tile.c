@@ -456,7 +456,19 @@ snp_callback_rx( void const *  _ctx,
     /* copy the buffered packet */
     memcpy( ctx->packet, packet, packet_sz );
   }
-  fd_stem_publish( ctx->stem, SHRED_OUT_IDX /*ctx->shred_out_idx*/, sig, ctx->shred_out_chunk, packet_sz, 0UL, ctx->tsorig, tspub );
+
+  ulong adj_ctl       = 0UL;
+  ulong adj_packet_sz = packet_sz;
+  ulong proto;
+  fd_snp_meta_into_parts( &proto, NULL, NULL, NULL, meta );
+  if( FD_LIKELY( proto != FD_SNP_META_PROTO_UDP ) ) {
+    adj_packet_sz -= ( 12 /*SNP*/ + 3/*TL*/ + 19 /*MAC*/ );
+    fd_ip4_hdr_t * ip4_hdr = (fd_ip4_hdr_t *)(packet + sizeof(fd_eth_hdr_t));
+    ulong hdr_sz = sizeof(fd_eth_hdr_t) + FD_IP4_GET_LEN( *ip4_hdr ) + sizeof(fd_udp_hdr_t);
+    memmove( ctx->packet+hdr_sz, packet+hdr_sz+( 12 /*SNP*/ + 3/*TL*/ ), adj_packet_sz-hdr_sz );
+  }
+
+  fd_stem_publish( ctx->stem, SHRED_OUT_IDX /*ctx->shred_out_idx*/, sig, ctx->shred_out_chunk, adj_packet_sz, adj_ctl, ctx->tsorig, tspub );
   ctx->shred_out_chunk = fd_dcache_compact_next( ctx->shred_out_chunk, packet_sz, ctx->shred_out_chunk0, ctx->shred_out_wmark );
 
   FD_DEBUG_SNP( FD_LOG_NOTICE(( "[snp] publish to shred %lu meta=%016lx", packet_sz, sig )) );
