@@ -129,9 +129,9 @@ before_credit( fd_eqvoct_tile_t *   ctx,
 }
 
 static int
-should_equivocate( fd_shred_t const * shred ) {
+should_equivocate( void ) {
   /* lazy way to get randomness & can only equivocate on the slot boundary */
-  return fd_log_wallclock() % 10 < 5 && shred->fec_set_idx == 0 && shred->slot > 1;
+  return fd_tickcount() % 100 < 30 ;
 }
 
 static fd_hash_t
@@ -214,17 +214,17 @@ after_credit( fd_eqvoct_tile_t *   ctx,
 
   ctx->chained_prev_slot = shred->slot;
   ctx->chained_prev_fec_set_idx = shred->fec_set_idx;
-  FD_LOG_INFO(("FEC set complete: slot: %lu, fec_set_idx: %u, batch_complete: %d, slot_complete: %d", shred->slot, shred->fec_set_idx, shred->data.flags & FD_SHRED_DATA_FLAG_DATA_COMPLETE, shred->data.flags & FD_SHRED_DATA_FLAG_SLOT_COMPLETE));
+  //FD_LOG_INFO(("FEC set complete: slot: %lu, fec_set_idx: %u, batch_complete: %d, slot_complete: %d", shred->slot, shred->fec_set_idx, shred->data.flags & FD_SHRED_DATA_FLAG_DATA_COMPLETE, shred->data.flags & FD_SHRED_DATA_FLAG_SLOT_COMPLETE));
 
   /* Complete FEC set, we can equivocate. Start by equivocating on the slot boundary */
 
-  uchar * out_buf   = fd_chunk_to_laddr( ctx->shred_out->mem, ctx->shred_out->chunk );
   int     is_leader = 0;
-  if( FD_UNLIKELY( should_equivocate( shred ) ) ) {
-    FD_LOG_WARNING(( "Equivocating slot %lu, fec_set_idx %u (new slot_complete), parent_slot %lu", shred->slot, shred->fec_set_idx, shred->slot - shred->data.parent_off ));
+  if( FD_UNLIKELY( shred->fec_set_idx == 0 && shred->slot > 1 && should_equivocate() ) ) {
     uchar hdr_buf[ FD_SHRED_DATA_HEADER_SZ ];
     fd_hash_t mr1 = equivocate_fec( ctx, shred, hdr_buf );
+    FD_LOG_WARNING(( "Equivocating slot %lu, fec_set_idx %u (new slot_complete), new mr %s", shred->slot, shred->fec_set_idx, FD_BASE58_ENC_32_ALLOCA( &mr1 ) ));
 
+    uchar * out_buf   = fd_chunk_to_laddr( ctx->shred_out->mem, ctx->shred_out->chunk );
     memcpy( out_buf, hdr_buf, FD_SHRED_DATA_HEADER_SZ );
     memcpy( out_buf + FD_SHRED_DATA_HEADER_SZ, &mr1, sizeof(fd_hash_t) );
     memcpy( out_buf + FD_SHRED_DATA_HEADER_SZ + sizeof(fd_hash_t), &cmr, sizeof(fd_hash_t) );
@@ -238,7 +238,8 @@ after_credit( fd_eqvoct_tile_t *   ctx,
   /* We need to simulate the FEC set completion message that is sent out
      of the shred tile.  This involves copying the data shred header and
      appending the merkle root and chained merkle root. */
-
+  FD_LOG_WARNING(( "Correct FEC slot %lu, fec_set_idx %u, mr %s", shred->slot, shred->fec_set_idx, FD_BASE58_ENC_32_ALLOCA( &mr ) ));
+  uchar * out_buf = fd_chunk_to_laddr( ctx->shred_out->mem, ctx->shred_out->chunk );
   memcpy( out_buf, shred, FD_SHRED_DATA_HEADER_SZ );
   memcpy( out_buf + FD_SHRED_DATA_HEADER_SZ, &mr, sizeof(fd_hash_t) );
   memcpy( out_buf + FD_SHRED_DATA_HEADER_SZ + sizeof(fd_hash_t), &cmr, sizeof(fd_hash_t) );
@@ -387,7 +388,7 @@ unprivileged_init( fd_topo_t *      topo,
     FD_LOG_ERR(( "scratch overflow %lu %lu %lu", scratch_top - (ulong)scratch - scratch_footprint( tile ), scratch_top, (ulong)scratch + scratch_footprint( tile ) ));
 }
 
-#define STEM_BURST                  (2UL) /* 1 after_credit + 1 returnable_frag */
+#define STEM_BURST                  (3UL) /* 1 after_credit + 1 returnable_frag */
 #define STEM_CALLBACK_CONTEXT_TYPE  fd_eqvoct_tile_t
 #define STEM_CALLBACK_CONTEXT_ALIGN alignof(fd_eqvoct_tile_t)
 
