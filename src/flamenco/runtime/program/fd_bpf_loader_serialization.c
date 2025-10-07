@@ -156,17 +156,8 @@ write_account( fd_borrowed_account_t *   account,
     /* https://github.com/anza-xyz/agave/blob/v3.0.0/program-runtime/src/serialization.rs#L170-L186 */
     if( FD_LIKELY( !is_loader_v1 ) ) {
       ulong align_offset = fd_ulong_align_up( dlen, FD_BPF_ALIGN_OF_U128 ) - dlen;
-      if( !direct_mapping ) {
-        fd_memset( *serialized_params, 0, align_offset );
-        *serialized_params += align_offset;
-      } else {
-        fd_memset( *serialized_params, 0, FD_BPF_ALIGN_OF_U128 );
-        *serialized_params      += fd_ulong_sat_sub( FD_BPF_ALIGN_OF_U128, align_offset );
-
-        /* In direct mapping, there is a gap between the data region and the metadata region
-           of the next account. */
-        *serialized_params_start = *serialized_params;
-      }
+      fd_memset( *serialized_params, 0, align_offset );
+      *serialized_params += align_offset;
     }
   }
 }
@@ -740,6 +731,8 @@ fd_bpf_loader_input_serialize_parameters( fd_exec_instr_ctx_t *     instr_ctx,
                                           int                       direct_mapping,
                                           uchar                     is_deprecated,
                                           uchar **                  out /* output */ ) {
+
+  FD_LOG_WARNING(("fd_bpf_loader_input_serialize_parameters, stricter_abi_and_runtime_constraints: %d direct_mapping: %d\n", stricter_abi_and_runtime_constraints, direct_mapping));
 
   /* https://github.com/anza-xyz/agave/blob/v3.0.0/program-runtime/src/serialization.rs#L234-L237 */
   ulong num_ix_accounts = instr_ctx->instr->acct_cnt;
