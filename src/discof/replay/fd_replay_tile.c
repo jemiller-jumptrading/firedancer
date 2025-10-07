@@ -1380,6 +1380,13 @@ replay( fd_replay_tile_t *  ctx,
 
     fd_txn_p_t * txn_p = fd_sched_get_txn( ctx->sched, ready_txn->txn_idx );
 
+    fd_txn_t * txn = TXN(txn_p);
+    if( fd_txn_is_simple_vote_transaction( txn, txn_p->payload ) ) {
+      FD_LOG_NOTICE(( "TXN SIMPLE_VOTE signature cnt: %u, IN BLOCK %lu", txn->signature_cnt, ready_txn->slot ));
+    } else {
+      FD_LOG_NOTICE(( "TXN NON-SIMPLE_VOTE signature cnt: %u, IN BLOCK %lu", txn->signature_cnt, ready_txn->slot ));
+    }
+
     /* FIXME: this should be done during txn parsing so that we don't
         have to loop over all accounts a second time. */
     /* Insert or reverify invoked programs for this epoch, if needed. */
@@ -1415,6 +1422,7 @@ process_fec_set( fd_replay_tile_t * ctx,
   if( !reasm_fec ) {
     return;
   }
+  FD_LOG_NOTICE(( "PROCESSED REASM_FEC: slot %lu, fec_set_idx %u", reasm_fec->slot, reasm_fec->fec_set_idx ));
 
   if( FD_UNLIKELY( reasm_fec->eqvoc ) ) {
     FD_LOG_ERR(( "Firedancer currently does not support mid-block equivocation and this was detected on slot %lu.", reasm_fec->slot ));
@@ -1669,6 +1677,7 @@ before_frag( fd_replay_tile_t * ctx,
        FEC sets. */
 
     if( FD_UNLIKELY( fd_reasm_full( ctx->reasm ) ) ) {
+      FD_LOG_WARNING(( "REASM IS FULL" ));
       return -1;
     }
   }
@@ -1815,6 +1824,7 @@ process_fec_complete( fd_replay_tile_t * ctx,
   if( FD_UNLIKELY( shred->slot - shred->data.parent_off == fd_reasm_slot0( ctx->reasm ) && shred->fec_set_idx == 0) ) {
     chained_merkle_root = &fd_reasm_root( ctx->reasm )->key;
   }
+  FD_LOG_NOTICE(( "ADDING FEC COMPLETE: slot %lu, fec_set_idx %u", shred->slot, shred->fec_set_idx ));
   FD_TEST( fd_reasm_insert( ctx->reasm,
                             merkle_root,
                             chained_merkle_root,

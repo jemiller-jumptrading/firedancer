@@ -223,6 +223,7 @@ sudo rm -rf $DUMP/$LEDGER/backtest.blockstore $DUMP/$LEDGER/backtest.funk &> /de
 sudo killall firedancer-dev || true
 
 set -x
+
 sudo "${DEBUG[@]}" $OBJDIR/bin/firedancer-dev backtest --config ${DUMP_DIR}/${LEDGER}_backtest.toml "$WATCH"
 { status=$?; set +x; } &> /dev/null
 
