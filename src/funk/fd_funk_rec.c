@@ -19,6 +19,7 @@
 #define MAP_IDX_T             uint
 #define MAP_NEXT              map_next
 #define MAP_MAGIC             (0xf173da2ce77ecdb0UL) /* Firedancer rec db version 0 */
+#define MAP_CNT_WIDTH         FD_FUNK_REC_MAP_CNT_WIDTH
 #define MAP_IMPL_STYLE        2
 #include "../util/tmpl/fd_map_chain_para.c"
 

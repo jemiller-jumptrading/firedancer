@@ -20,6 +20,7 @@
 #include "../../discof/restore/utils/fd_ssmsg.h"
 #include "../../flamenco/gossip/fd_gossip.h"
 #include "../../flamenco/runtime/context/fd_capture_ctx.h"
+#include "../../flamenco/progcache/fd_progcache_admin.h"
 
 #include <sys/random.h>
 #include <sys/types.h>

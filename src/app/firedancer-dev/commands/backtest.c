@@ -25,6 +25,7 @@
 #include "../../../discof/restore/utils/fd_ssmsg.h"
 #include "../../../discof/tower/fd_tower_tile.h"
 #include "../../../discof/replay/fd_exec.h" /* FD_RUNTIME_PUBLIC_ACCOUNT_UPDATE_MSG_MTU */
+#include "../../../flamenco/progcache/fd_progcache_admin.h"
 
 #include "../main.h"
 
