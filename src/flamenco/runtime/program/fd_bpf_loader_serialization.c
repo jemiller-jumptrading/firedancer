@@ -45,6 +45,7 @@ new_input_mem_region( fd_vm_input_region_t * input_mem_regions,
                       const uchar *          buffer,
                       ulong                  region_sz,
                       ulong                  address_space_reserved,
+                      ulong                  padding,
                       uchar                  is_writable ) {
 
   /* The start vaddr of the new region should be equal to start of the previous
@@ -56,6 +57,7 @@ new_input_mem_region( fd_vm_input_region_t * input_mem_regions,
   input_mem_regions[ *input_mem_regions_cnt ].region_sz              = (uint)region_sz;
   input_mem_regions[ *input_mem_regions_cnt ].address_space_reserved = address_space_reserved;
   input_mem_regions[ *input_mem_regions_cnt ].vaddr_offset           = vaddr_offset;
+  input_mem_regions[ *input_mem_regions_cnt ].padding                = padding;
   (*input_mem_regions_cnt)++;
 }
 
@@ -68,13 +70,14 @@ new_input_mem_region( fd_vm_input_region_t * input_mem_regions,
    different memory regions. In both cases, padding is used to maintain 8 byte
    alignment. If alignment is not required, then a resizing buffer is not used
    as the deprecated loader doesn't allow for resizing accounts. */
-static void
+static ulong
 write_account( fd_borrowed_account_t *   account,
                uchar                     instr_acc_idx,
                uchar * *                 serialized_params,
                uchar * *                 serialized_params_start,
                fd_vm_input_region_t *    input_mem_regions,
                uint *                    input_mem_regions_cnt,
+               ulong                     padding,
                fd_vm_acc_region_meta_t * acc_region_metas,
                int                       is_loader_v1,
                int                       stricter_abi_and_runtime_constraints,
@@ -98,12 +101,12 @@ write_account( fd_borrowed_account_t *   account,
       fd_memset( *serialized_params, 0, MAX_PERMITTED_DATA_INCREASE + align_offset );
       *serialized_params += MAX_PERMITTED_DATA_INCREASE + align_offset;
     }
-    /* In the legacy case, we don't bother with setting up mem regions.
-       So has_data_region and has_resizing_region are set to 0. */
-    acc_region_metas[instr_acc_idx].region_idx          = UINT_MAX;
-    acc_region_metas[instr_acc_idx].has_data_region     = 0U;
-    acc_region_metas[instr_acc_idx].has_resizing_region = 0U;
+    acc_region_metas[instr_acc_idx].region_idx = UINT_MAX;
   } else { /* stricter_abi_and_runtime_constraints == true */
+
+    /* Set up account region metadata */
+    acc_region_metas[instr_acc_idx].region_idx = *input_mem_regions_cnt;
+
     /* First, push on the region for the metadata that has just been serialized.
        This function will push the metadata in the serialized_params from
        serialized_params_start to serialized_params as a region to the input
@@ -111,7 +114,7 @@ write_account( fd_borrowed_account_t *   account,
 
        https://github.com/anza-xyz/agave/blob/v3.0.0/program-runtime/src/serialization.rs#L142 */
     ulong region_sz = (ulong)(*serialized_params) - (ulong)(*serialized_params_start);
-    new_input_mem_region( input_mem_regions, input_mem_regions_cnt, *serialized_params_start, region_sz, region_sz, 1U );
+    new_input_mem_region( input_mem_regions, input_mem_regions_cnt, *serialized_params_start, region_sz, region_sz, padding, 1U );
 
     /* If direct mapping isn't enabled, then copy the account data in directly
        https://github.com/anza-xyz/agave/blob/v3.0.0/program-runtime/src/serialization.rs#L144-L150 */
@@ -129,11 +132,6 @@ write_account( fd_borrowed_account_t *   account,
     ulong address_space_reserved = !is_loader_v1 ?
       fd_ulong_sat_add( dlen, MAX_PERMITTED_DATA_INCREASE ) : dlen;
 
-    /* Set up account region metadata */
-    acc_region_metas[instr_acc_idx].region_idx          = *input_mem_regions_cnt;
-    acc_region_metas[instr_acc_idx].has_data_region     = (address_space_reserved > 0) ? 1U : 0U;
-    acc_region_metas[instr_acc_idx].has_resizing_region = (uchar)!is_loader_v1;
-
     /* https://github.com/anza-xyz/agave/blob/v3.0.0/program-runtime/src/serialization.rs#L159-L169 */
     if( address_space_reserved > 0 ) {
       int err = 0;
@@ -143,13 +141,12 @@ write_account( fd_borrowed_account_t *   account,
         /* Create region pointing to the copied data in buffer
            https://github.com/anza-xyz/agave/blob/v3.0.0/program-runtime/src/serialization.rs#L160-L164 */
         uchar * data_start = *serialized_params - address_space_reserved;
-        new_input_mem_region( input_mem_regions, input_mem_regions_cnt, data_start, dlen, address_space_reserved, is_writable );
+        new_input_mem_region( input_mem_regions, input_mem_regions_cnt, data_start, dlen, address_space_reserved, 0UL, is_writable );
       } else {
         /* Direct mapping: create region pointing directly to account data */
-        new_input_mem_region( input_mem_regions, input_mem_regions_cnt, data, dlen, address_space_reserved, is_writable );
+        new_input_mem_region( input_mem_regions, input_mem_regions_cnt, data, dlen, address_space_reserved, 0UL, is_writable );
       }
     }
-
 
     *serialized_params_start = *serialized_params;
 
@@ -158,8 +155,11 @@ write_account( fd_borrowed_account_t *   account,
       ulong align_offset = fd_ulong_align_up( dlen, FD_BPF_ALIGN_OF_U128 ) - dlen;
       fd_memset( *serialized_params, 0, align_offset );
       *serialized_params += align_offset;
+      return align_offset;
     }
   }
+
+  return 0UL;
 }
 
 /* https://github.com/anza-xyz/agave/blob/v3.0.0/program-runtime/src/serialization.rs#L466 */
@@ -233,6 +233,7 @@ fd_bpf_loader_input_serialize_aligned( fd_exec_instr_ctx_t *     ctx,
   /* https://github.com/anza-xyz/agave/blob/v3.0.0/program-runtime/src/serialization.rs#L522 */
   FD_STORE( ulong, serialized_params, ctx->instr->acct_cnt );
   serialized_params += sizeof(ulong);
+  ulong padding      = sizeof(ulong);
 
   /* Second pass over the account is to serialize into the buffer.
      https://github.com/anza-xyz/agave/blob/v3.0.0/program-runtime/src/serialization.rs#L523-L557 */
@@ -248,13 +249,8 @@ fd_bpf_loader_input_serialize_aligned( fd_exec_instr_ctx_t *     ctx,
       FD_STORE( ulong, serialized_params, 0UL );
       FD_STORE( uchar, serialized_params, (uchar)dup_acc_idx[acc_idx] );
       serialized_params += sizeof(ulong);
+      padding           += sizeof(ulong);
     } else {
-      /* Calculate and store the start of the actual metadata region for this account,
-         excluding any duplicate account markers at the beginning.
-
-         We use this later for retrieving the serialized values later in the CPI security checks. */
-      acc_region_metas[i].metadata_region_offset = (ulong)(serialized_params - serialized_params_start);
-
       /* https://github.com/anza-xyz/agave/blob/v3.0.0/program-runtime/src/serialization.rs#L526 */
       FD_STORE( uchar, serialized_params, FD_NON_DUP_MARKER );
       serialized_params += sizeof(uchar);
@@ -312,13 +308,14 @@ fd_bpf_loader_input_serialize_aligned( fd_exec_instr_ctx_t *     ctx,
       serialized_params += sizeof(ulong);
 
       /* https://github.com/anza-xyz/agave/blob/v3.0.0/program-runtime/src/serialization.rs#L536 */
-      write_account(
+      padding = write_account(
         &view_acc,
         (uchar)i,
         &serialized_params,
         &curr_serialized_params_start,
         input_mem_regions,
         input_mem_regions_cnt,
+        padding,
         acc_region_metas,
         0,
         stricter_abi_and_runtime_constraints,
@@ -327,6 +324,7 @@ fd_bpf_loader_input_serialize_aligned( fd_exec_instr_ctx_t *     ctx,
       /* https://github.com/anza-xyz/agave/blob/v3.0.0/program-runtime/src/serialization.rs#L537-L541 */
       FD_STORE( ulong, serialized_params, ULONG_MAX );
       serialized_params += sizeof(ulong);
+      padding           += sizeof(ulong);
     }
 
   }
@@ -348,7 +346,7 @@ fd_bpf_loader_input_serialize_aligned( fd_exec_instr_ctx_t *     ctx,
   /* Write out the final region. */
   ulong region_sz = (ulong)(serialized_params - curr_serialized_params_start);
   new_input_mem_region( input_mem_regions, input_mem_regions_cnt, curr_serialized_params_start,
-                        region_sz, region_sz, 1U );
+                        region_sz, region_sz, padding, 1U );
 
   *sz = serialized_size;
 
@@ -536,6 +534,7 @@ fd_bpf_loader_input_serialize_unaligned( fd_exec_instr_ctx_t *     ctx,
 
   FD_STORE( ulong, serialized_params, ctx->instr->acct_cnt );
   serialized_params += sizeof(ulong);
+  ulong padding      = sizeof(ulong);
 
   for( ushort i=0; i<ctx->instr->acct_cnt; i++ ) {
     uchar               acc_idx = (uchar)ctx->instr->accounts[i].index_in_transaction;
@@ -545,18 +544,8 @@ fd_bpf_loader_input_serialize_unaligned( fd_exec_instr_ctx_t *     ctx,
       // Duplicate
       FD_STORE( uchar, serialized_params, (uchar)dup_acc_idx[acc_idx] );
       serialized_params += sizeof(uchar);
+      padding           += sizeof(uchar);
     } else {
-      /* Calculate and store the start of the actual metadata region for this account,
-         excluding any duplicate account markers at the beginning.
-
-         We use this later for retrieving the serialized values later in the CPI security checks. */
-      ulong metadata_region_offset_with_dups = *input_mem_regions_cnt==0UL ? 0UL :
-        input_mem_regions[ *input_mem_regions_cnt-1U ].vaddr_offset +
-        input_mem_regions[ *input_mem_regions_cnt-1U ].region_sz;
-
-      acc_region_metas[i].metadata_region_offset = metadata_region_offset_with_dups +
-        (ulong)(serialized_params - curr_serialized_params_start);
-
       FD_STORE( uchar, serialized_params, FD_NON_DUP_MARKER );
       serialized_params += sizeof(uchar);
 
@@ -587,9 +576,9 @@ fd_bpf_loader_input_serialize_unaligned( fd_exec_instr_ctx_t *     ctx,
       FD_STORE( ulong, serialized_params, acc_data_len );
       serialized_params += sizeof(ulong);
 
-      write_account( &view_acc, (uchar)i, &serialized_params, &curr_serialized_params_start,
-                     input_mem_regions, input_mem_regions_cnt, acc_region_metas, 1,
-                     stricter_abi_and_runtime_constraints, direct_mapping );
+      padding = write_account( &view_acc, (uchar)i, &serialized_params, &curr_serialized_params_start,
+        input_mem_regions, input_mem_regions_cnt, padding, acc_region_metas, 1,
+        stricter_abi_and_runtime_constraints, direct_mapping );
 
       fd_pubkey_t owner = *(fd_pubkey_t *)&metadata->owner;
       FD_STORE( fd_pubkey_t, serialized_params, owner );
@@ -620,7 +609,7 @@ fd_bpf_loader_input_serialize_unaligned( fd_exec_instr_ctx_t *     ctx,
 
   ulong region_sz = (ulong)(serialized_params - curr_serialized_params_start);
   new_input_mem_region( input_mem_regions, input_mem_regions_cnt, curr_serialized_params_start,
-    region_sz, region_sz, 1U );
+    region_sz, region_sz, padding, 1U );
 
   return serialized_params_start;
 }

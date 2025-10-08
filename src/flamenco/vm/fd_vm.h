@@ -28,6 +28,7 @@ struct __attribute__((aligned(8UL))) fd_vm_input_region {
    uint  region_sz;              /* Size of the memory region. */
    ulong address_space_reserved; /* The amount of address space reserved for the region. */
    uchar is_writable;            /* If the region can be written to or is read-only */
+   ulong padding;                /* Empty padding at the start of the region.*/
 };
 typedef struct fd_vm_input_region fd_vm_input_region_t;
 
@@ -37,11 +38,6 @@ typedef struct fd_vm_input_region fd_vm_input_region_t;
 
 struct __attribute((aligned(8UL))) fd_vm_acc_region_meta { /* TODO: remove this */
    uint  region_idx;
-   uchar has_data_region; /* TODO: remove this */
-   uchar has_resizing_region; /* TODO: remove this */
-   /* offset of the accounts metadata region, relative to the start of the input region.
-      importantly, this excludes any duplicate account markers at the beginning of the "full" metadata region. */
-   ulong metadata_region_offset; /* TODO: remove this */
    /* FIXME: We can get rid of this field once DM is activated.  This is
       only a hack to make the non-DM code path happy.  When DM is
       activated, we could query the input_mem_region array for the

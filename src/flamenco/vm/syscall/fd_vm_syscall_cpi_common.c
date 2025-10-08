@@ -388,8 +388,9 @@ VM_SYSCALL_CPI_TRANSLATE_AND_UPDATE_ACCOUNTS_FUNC(
       /* https://github.com/anza-xyz/agave/blob/v3.0.4/syscalls/src/cpi.rs#L196-L203
        */
       if( vm->stricter_abi_and_runtime_constraints ) {
+        fd_vm_input_region_t * region = &vm->input_mem_regions[ acc_region_meta->region_idx + 1UL ];
         ulong expected_data_vaddr = FD_VM_MEM_MAP_INPUT_REGION_START +
-          vm->input_mem_regions[acc_region_meta->region_idx].vaddr_offset;
+          region->vaddr_offset + region->address_space_reserved;
         VM_SYSCALL_CPI_CHECK_ACCOUNT_INFO_POINTER_FIELD_MAX_54(vm, data_vaddr, expected_data_vaddr, "data");
       }
 

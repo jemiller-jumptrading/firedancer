@@ -317,7 +317,7 @@ fd_vm_cpi_update_caller_account_region( fd_vm_t *                    vm,
   /* https://github.com/anza-xyz/agave/blob/v3.0.4/syscalls/src/cpi.rs#L1159-L1164 */
   if( address_space_reserved_for_account > 0UL ) {
     fd_vm_acc_region_meta_t * acc_region_meta = &vm->acc_region_metas[instr_acc_idx];
-    fd_vm_input_region_t *    region          = &vm->input_mem_regions[acc_region_meta->region_idx];
+    fd_vm_input_region_t *    region          = &vm->input_mem_regions[acc_region_meta->region_idx + 1UL];
 
     /* https://github.com/anza-xyz/agave/blob/v3.0.4/syscalls/src/cpi.rs#L1159-L1165 */
     /* https://github.com/anza-xyz/agave/blob/master/program-runtime/src/serialization.rs#L27 */
@@ -389,10 +389,10 @@ fd_vm_syscall_cpi_check_authorized_program( fd_pubkey_t const *       program_id
 /* Helper functions to get the absolute vaddrs of the serialized accounts pubkey, lamports and owner.
 
    For the accounts not owned by the deprecated loader, all of these offsets into the accounts metadata region
-   are static from fd_vm_acc_region_meta->metadata_region_offset.
+   are static from region->padding.
 
    For accounts owned by the deprecated loader, the unaligned serializer is used, which means only the pubkey
-   and lamports offsets are static from the metadata_region_offset. The owner is serialized into the region
+   and lamports offsets are static from the region->padding. The owner is serialized into the region
    immediately following the account data region (if present) at a fixed offset.
  */
 #define VM_SERIALIZED_PUBKEY_OFFSET   (8UL)
@@ -404,12 +404,14 @@ fd_vm_syscall_cpi_check_authorized_program( fd_pubkey_t const *       program_id
 
 static inline
 ulong serialized_pubkey_vaddr( fd_vm_t * vm, fd_vm_acc_region_meta_t * acc_region_meta ) {
-  return FD_VM_MEM_MAP_INPUT_REGION_START + acc_region_meta->metadata_region_offset +
+fd_vm_input_region_t * region = &vm->input_mem_regions[ acc_region_meta->region_idx ];
+  return FD_VM_MEM_MAP_INPUT_REGION_START + region->vaddr_offset + region->padding +
     (vm->is_deprecated ? VM_SERIALIZED_UNALIGNED_PUBKEY_OFFSET : VM_SERIALIZED_PUBKEY_OFFSET);
 }
 
 static inline
 ulong serialized_owner_vaddr( fd_vm_t * vm, fd_vm_acc_region_meta_t * acc_region_meta ) {
+fd_vm_input_region_t * region = &vm->input_mem_regions[ acc_region_meta->region_idx ];
   if ( vm->is_deprecated ) {
     /* For deprecated loader programs, the owner is serialized into the start of the region
        following the account data region (if present) at a fixed offset.
@@ -417,17 +419,20 @@ ulong serialized_owner_vaddr( fd_vm_t * vm, fd_vm_acc_region_meta_t * acc_region
        serialized into the same fixed offset following the account's
        metadata region.
      */
-    return FD_VM_MEM_MAP_INPUT_REGION_START + vm->input_mem_regions[
-      acc_region_meta->has_data_region ? acc_region_meta->region_idx+1U : acc_region_meta->region_idx
-    ].vaddr_offset;
+    if( region->address_space_reserved > 0UL ) {
+      fd_vm_input_region_t * metadata_region = &vm->input_mem_regions[ acc_region_meta->region_idx+1U ];
+      return FD_VM_MEM_MAP_INPUT_REGION_START + metadata_region->vaddr_offset + metadata_region->padding;
+  } else {
+  return FD_VM_MEM_MAP_INPUT_REGION_START + region->vaddr_offset + region->padding;
+    }
   }
-
-  return FD_VM_MEM_MAP_INPUT_REGION_START + acc_region_meta->metadata_region_offset + VM_SERIALIZED_OWNER_OFFSET;
+  return FD_VM_MEM_MAP_INPUT_REGION_START + region->vaddr_offset + region->padding + VM_SERIALIZED_OWNER_OFFSET;
 }
 
 static inline
 ulong serialized_lamports_vaddr( fd_vm_t * vm, fd_vm_acc_region_meta_t * acc_region_meta ) {
-  return FD_VM_MEM_MAP_INPUT_REGION_START + acc_region_meta->metadata_region_offset +
+fd_vm_input_region_t * region = &vm->input_mem_regions[ acc_region_meta->region_idx ];
+  return FD_VM_MEM_MAP_INPUT_REGION_START + region->vaddr_offset + region->padding +
     (vm->is_deprecated ? VM_SERIALIZED_UNALIGNED_LAMPORTS_OFFSET : VM_SERIALIZED_LAMPORTS_OFFSET);
 }
 
