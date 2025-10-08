@@ -434,7 +434,6 @@ fd_vm_mem_haddr( fd_vm_t const * vm,
      https://github.com/anza-xyz/agave/blob/v2.2.12/programs/bpf_loader/src/lib.rs#L344-L351
     */
   if( FD_UNLIKELY( region==FD_VM_STACK_REGION &&
-                   !vm->direct_mapping &&
                    !FD_VM_SBPF_DYNAMIC_STACK_FRAMES( vm->sbpf_version ) ) ) {
     /* If an access starts in a gap region, that is an access violation */
     if( FD_UNLIKELY( !!(vaddr & 0x1000) ) ) {
