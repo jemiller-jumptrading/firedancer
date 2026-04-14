@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 #include "../../util/bits/fd_bits.h"
 
@@ -33,23 +34,55 @@ fd_rocksdb_init( fd_rocksdb_t * db,
   db->cfgs[ FD_ROCKSDB_CFIDX_OPTIMISTIC_SLOTS         ] = "optimistic_slots";
   db->cfgs[ FD_ROCKSDB_CFIDX_MERKLE_ROOT_META         ] = "merkle_root_meta";
 
-  rocksdb_options_t const * cf_options[ FD_ROCKSDB_CF_CNT ];
-  for( ulong i=0UL; i<FD_ROCKSDB_CF_CNT; i++ )
-    cf_options[ i ] = db->opts;
+  char * err = NULL;
 
-  char *err = NULL;
+  /* Discover which column families actually exist in the DB.  Agave may
+     stop populating certain CFs across versions (e.g. transaction_status_index),
+     so we only open the ones that are present. */
+  size_t num_db_cfs = 0;
+  char ** db_cf_names = rocksdb_list_column_families( db->opts, db_name, &num_db_cfs, &err );
+  if( FD_UNLIKELY( err ) ) return err;
 
+  /* For each expected CF, check whether it exists in the DB */
+  char const *             open_cfgs   [ FD_ROCKSDB_CF_CNT ];
+  rocksdb_options_t const *open_opts   [ FD_ROCKSDB_CF_CNT ];
+  ulong                    open_map    [ FD_ROCKSDB_CF_CNT ]; /* open_map[j] = original cf index */
+  ulong                    open_cnt    = 0UL;
+
+  for( ulong i=0UL; i<FD_ROCKSDB_CF_CNT; i++ ) {
+    int found = 0;
+    for( size_t k=0UL; k<num_db_cfs; k++ ) {
+      if( 0==strcmp( db->cfgs[i], db_cf_names[k] ) ) { found = 1; break; }
+    }
+    if( found ) {
+      open_cfgs[ open_cnt ] = db->cfgs[ i ];
+      open_opts[ open_cnt ] = db->opts;
+      open_map [ open_cnt ] = i;
+      open_cnt++;
+    } else {
+      FD_LOG_WARNING(( "fd_rocksdb_init: column family \"%s\" not found in %s, skipping", db->cfgs[i], db_name ));
+    }
+  }
+
+  rocksdb_list_column_families_destroy( db_cf_names, num_db_cfs );
+
+  rocksdb_column_family_handle_t * open_handles[ FD_ROCKSDB_CF_CNT ];
   db->db = rocksdb_open_for_read_only_column_families(
       db->opts,
       db_name,
-      FD_ROCKSDB_CF_CNT,
-      (char              const * const *)db->cfgs,
-      (rocksdb_options_t const * const *)cf_options,
-      db->cf_handles,
+      (int)open_cnt,
+      (char              const * const *)open_cfgs,
+      (rocksdb_options_t const * const *)open_opts,
+      open_handles,
       false,
       &err );
 
   if( FD_UNLIKELY( err ) ) return err;
+
+  /* Map handles back to their canonical CF indices.  Missing CFs get NULL. */
+  for( ulong j=0UL; j<open_cnt; j++ ) {
+    db->cf_handles[ open_map[j] ] = open_handles[ j ];
+  }
 
   db->ro = rocksdb_readoptions_create();
 
@@ -340,6 +373,11 @@ fd_rocksdb_copy_over_slot_indexed_range( fd_rocksdb_t * src,
        cf_idx == FD_ROCKSDB_CFIDX_TRANSACTION_STATUS ||
        cf_idx == FD_ROCKSDB_CFIDX_ADDRESS_SIGNATURES ) {
     FD_LOG_NOTICE(( "fd_rocksdb_copy_over_range: skipping cf_idx=%lu because not slot indexed", cf_idx ));
+    return 0;
+  }
+
+  if( FD_UNLIKELY( src->cf_handles[cf_idx] == NULL ) ) {
+    FD_LOG_WARNING(( "fd_rocksdb_copy_over_slot_indexed_range: skipping cf_idx=%lu because handle is NULL (column family missing from source)", cf_idx ));
     return 0;
   }
 
